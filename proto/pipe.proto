@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+message Event {
+    string key = 1;
+}
+
+enum ErrorType {
+    NONE = 0;
+}
+
+message Error {
+    ErrorType type = 1;
+    string message = 2;
+}
+
+enum Result {
+    ACK = 0;
+    ERROR = 1;
+}
+
+message PushResponse {
+    Result result = 1;
+    ErrorType errorType = 2;
+}
+
+message Stats {
+    int64 count = 1;
+}
+
+message Queue {
+    string key = 1;
+    Stats stats = 2;
+}
+
+message GetQueueRequest {
+    string key = 1;
+}
+
+service Pipe {
+    rpc push (Event) returns (PushResponse);
+    rpc get (GetQueueRequest) returns (Queue);
+}
