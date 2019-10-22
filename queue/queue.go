@@ -7,15 +7,32 @@ import (
 	"time"
 )
 
+type Stats struct {
+	Count       int
+	NewestEvent *time.Time
+	OldestEvent *time.Time
+}
+
+func (s Stats) String() string {
+	return fmt.Sprintf("count: %d, newest: %s, oldest: %s",
+		s.Count, s.NewestEvent, s.OldestEvent)
+}
+
 type Queue struct {
 	key        string
 	windowSize time.Duration
 	events     *list.List
 	lock       sync.Mutex
+
+	// internal stats (updated on queue change)
+	count   int
+	avgDist time.Duration
+	first   *list.Element
+	last    *list.Element
 }
 
-type event struct {
-	timestamp time.Time
+func (q Queue) String() string {
+	return fmt.Sprintf("Queue[%s]", q.key)
 }
 
 func New(key string, windowSize time.Duration) *Queue {
@@ -26,29 +43,32 @@ func New(key string, windowSize time.Duration) *Queue {
 	}
 }
 
-func (q Queue) GetCount() int {
+func (q *Queue) Stats() *Stats {
 	q.trimUntil(time.Now().Add(-q.windowSize))
-	return q.events.Len()
+
+	stats := &Stats{Count: q.count}
+	f := q.first
+	if f != nil {
+		stats.NewestEvent = &f.Value.(*event).timestamp
+	} else {
+		stats.NewestEvent = nil
+	}
+	b := q.last
+	if b != nil {
+		stats.OldestEvent = &b.Value.(*event).timestamp
+	} else {
+		stats.OldestEvent = nil
+	}
+	return stats
 }
 
 func (q *Queue) Tick() {
-	event := &event{timestamp: time.Now()}
-	q.push(event)
-	q.Trim()
-}
-
-func (q *Queue) push(e *event) {
 	q.lock.Lock()
-	q.events.PushFront(e)
-	q.lock.Unlock()
-}
+	defer q.lock.Unlock()
 
-func (q Queue) String() string {
-	return fmt.Sprintf("Queue[%s](%d)", q.key, q.events.Len())
-}
-
-func (q *Queue) Trim() {
-	q.trimUntil(time.Now().Add(-q.windowSize))
+	ev := &event{timestamp: time.Now()}
+	q.events.PushFront(ev)
+	q.updateStats()
 }
 
 func (q *Queue) trimUntil(cutoff time.Time) {
@@ -56,11 +76,18 @@ func (q *Queue) trimUntil(cutoff time.Time) {
 	defer q.lock.Unlock()
 
 	for elem := q.events.Back(); elem != nil; elem = q.events.Back() {
-		event := elem.Value.(*event)
-		if event.timestamp.After(cutoff) {
+		ev := elem.Value.(*event)
+		if ev.timestamp.After(cutoff) {
 			break
 		} else {
 			q.events.Remove(elem)
 		}
 	}
+	q.updateStats()
+}
+
+func (q *Queue) updateStats() {
+	q.count = q.events.Len()
+	q.first = q.events.Front()
+	q.last = q.events.Back()
 }
