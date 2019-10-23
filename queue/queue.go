@@ -8,14 +8,12 @@ import (
 )
 
 type Stats struct {
-	Count       int
-	NewestEvent *time.Time
-	OldestEvent *time.Time
+	Count      int
+	AvgDeltaMs float64
 }
 
 func (s Stats) String() string {
-	return fmt.Sprintf("count: %d, newest: %s, oldest: %s",
-		s.Count, s.NewestEvent, s.OldestEvent)
+	return fmt.Sprintf("count: %d, avg.delta: %fms", s.Count, s.AvgDeltaMs)
 }
 
 type Queue struct {
@@ -25,10 +23,10 @@ type Queue struct {
 	lock       sync.Mutex
 
 	// internal stats (updated on queue change)
-	count   int
-	avgDist time.Duration
-	first   *list.Element
-	last    *list.Element
+	count        int
+	deltaSum     int64
+	prevOldestTs time.Time
+	avg          float64
 }
 
 func (q Queue) String() string {
@@ -46,19 +44,7 @@ func New(key string, windowSize time.Duration) *Queue {
 func (q *Queue) Stats() *Stats {
 	q.trimUntil(time.Now().Add(-q.windowSize))
 
-	stats := &Stats{Count: q.count}
-	f := q.first
-	if f != nil {
-		stats.NewestEvent = &f.Value.(*event).timestamp
-	} else {
-		stats.NewestEvent = nil
-	}
-	b := q.last
-	if b != nil {
-		stats.OldestEvent = &b.Value.(*event).timestamp
-	} else {
-		stats.OldestEvent = nil
-	}
+	stats := &Stats{Count: q.count, AvgDeltaMs: q.avg}
 	return stats
 }
 
@@ -66,9 +52,16 @@ func (q *Queue) Tick() {
 	q.lock.Lock()
 	defer q.lock.Unlock()
 
-	ev := &event{timestamp: time.Now()}
+	curTs := time.Now()
+
+	oldf := q.events.Front()
+	if oldf == nil {
+		q.prevOldestTs = curTs
+	} else {
+		q.deltaSum += curTs.Sub(oldf.Value.(*event).timestamp).Milliseconds()
+	}
+	ev := &event{curTs}
 	q.events.PushFront(ev)
-	q.updateStats()
 }
 
 func (q *Queue) trimUntil(cutoff time.Time) {
@@ -77,17 +70,18 @@ func (q *Queue) trimUntil(cutoff time.Time) {
 
 	for elem := q.events.Back(); elem != nil; elem = q.events.Back() {
 		ev := elem.Value.(*event)
-		if ev.timestamp.After(cutoff) {
+		ts := ev.timestamp
+
+		if ts.After(cutoff) {
 			break
 		} else {
 			q.events.Remove(elem)
+			q.deltaSum = q.deltaSum - ts.Sub(q.prevOldestTs).Milliseconds()
+			q.prevOldestTs = ts
 		}
 	}
-	q.updateStats()
-}
-
-func (q *Queue) updateStats() {
 	q.count = q.events.Len()
-	q.first = q.events.Front()
-	q.last = q.events.Back()
+	if q.count != 0 {
+		q.avg = float64(q.deltaSum) / float64(q.count)
+	}
 }

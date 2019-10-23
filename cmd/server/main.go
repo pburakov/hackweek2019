@@ -41,6 +41,7 @@ func main() {
 	log.SetOutput(os.Stdout)
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 
+	log.Printf("pid: %d", os.Getpid())
 	port := flag.Int("port", 32232, "server port")
 	flag.Parse()
 
@@ -63,9 +64,11 @@ func (s *server) getOrInsert(key string) *queue.Queue {
 }
 
 func convert(q *queue.Queue) *pb.Queue {
+	stats := q.Stats()
 	return &pb.Queue{
 		Stats: &pb.Stats{
-			Count: uint64(q.Stats().Count),
+			Count:      uint64(stats.Count),
+			AvgDeltaMs: stats.AvgDeltaMs,
 		},
 	}
 }

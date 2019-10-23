@@ -10,6 +10,7 @@ message Batch {
 
 message Stats {
     uint64 count = 1;
+    double avgDeltaMs = 2;
 }
 
 message Queue {
