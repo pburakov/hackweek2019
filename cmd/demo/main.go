@@ -52,9 +52,7 @@ func main() {
 func pushAndPrint(client pb.PipeClient, key string, d *demo, wg *sync.WaitGroup) {
 	defer wg.Done()
 	q, err := client.Push(context.Background(), &pb.Event{Key: key})
-	if err != nil || q == nil {
-		fmt.Printf("error or nil response")
-	} else {
+	if err == nil && q != nil {
 		d.counts.Store(key, q.Stats.Count)
 		d.deltas.Store(key, q.Stats.AvgDeltaMs)
 		printout(d)
