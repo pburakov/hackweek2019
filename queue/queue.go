@@ -3,6 +3,9 @@ package queue
 import (
 	"container/list"
 	"fmt"
+	"io"
+	"log"
+	"os"
 	"sync"
 	"time"
 )
@@ -21,6 +24,7 @@ type Queue struct {
 	windowSize time.Duration
 	events     *list.List
 	lock       sync.Mutex
+	appendLog  *os.File
 
 	// internal stats (updated on queue change)
 	count        int
@@ -34,11 +38,16 @@ func (q Queue) String() string {
 }
 
 func New(key string, windowSize time.Duration) *Queue {
-	return &Queue{
+	log.Printf("creating queue %s", key)
+	appendLog := mustOpenFile(key)
+	q := &Queue{
 		key:        key,
 		windowSize: windowSize,
 		events:     list.New(),
+		appendLog:  appendLog,
 	}
+	q.readEvents(appendLog)
+	return q
 }
 
 func (q *Queue) Stats() *Stats {
@@ -54,13 +63,24 @@ func (q *Queue) Tick() {
 
 	curTs := time.Now()
 
+	ev := &event{curTs}
+
+	b, _ := ev.MarshalBinary()
+	_, err := q.appendLog.Write(b)
+	if err != nil {
+		log.Printf("error writing to append log: %s", err)
+	}
+
+	q.addEvent(ev)
+}
+
+func (q *Queue) addEvent(ev *event) {
 	oldf := q.events.Front()
 	if oldf == nil {
-		q.prevOldestTs = curTs
+		q.prevOldestTs = ev.timestamp
 	} else {
-		q.deltaSum += curTs.Sub(oldf.Value.(*event).timestamp).Milliseconds()
+		q.deltaSum += ev.timestamp.Sub(oldf.Value.(*event).timestamp).Milliseconds()
 	}
-	ev := &event{curTs}
 	q.events.PushFront(ev)
 }
 
@@ -83,5 +103,46 @@ func (q *Queue) trimUntil(cutoff time.Time) {
 	q.count = q.events.Len()
 	if q.count != 0 {
 		q.avg = float64(q.deltaSum) / float64(q.count)
+	}
+}
+
+func mustOpenFile(key string) *os.File {
+	pattern := key + "_%04d.pip"
+	name := fmt.Sprintf(pattern, 0)
+	f, e := os.OpenFile(name, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+	if e != nil {
+		log.Fatalf("io error %s", e)
+	}
+	log.Printf("opened file %s", f.Name())
+	return f
+}
+
+func (q *Queue) readEvents(f *os.File) {
+	count := 0
+	for {
+		buf := make([]byte, 15)
+		_, err := f.Read(buf)
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("unable to read bytes: %s", err)
+			}
+			break
+		}
+		var ev event
+		err = ev.UnmarshalBinary(buf)
+		if err != nil {
+			log.Printf("error reading binary info: %s", err)
+			break
+		}
+		q.addEvent(&ev)
+		count++
+	}
+	log.Printf("added %d events into queue %s", count, q)
+}
+
+func (q *Queue) Close() {
+	err := q.appendLog.Close()
+	if err != nil {
+		log.Printf("error closing file: %s", err)
 	}
 }

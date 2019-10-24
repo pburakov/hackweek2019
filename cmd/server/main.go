@@ -59,7 +59,11 @@ func main() {
 }
 
 func (s *server) getOrInsert(key string) *queue.Queue {
-	q, _ := s.queues.LoadOrStore(key, queue.New(key, 10*time.Second))
+	q, found := s.queues.Load(key)
+	if !found {
+		n := queue.New(key, 10*time.Second)
+		q, _ = s.queues.LoadOrStore(key, n)
+	}
 	return q.(*queue.Queue)
 }
 
