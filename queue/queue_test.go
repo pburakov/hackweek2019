@@ -22,6 +22,27 @@ func TestQueue_Tick(t *testing.T) {
 	}
 }
 
+func TestQueue_TrimNow(t *testing.T) {
+	defer cleanup()
+
+	wait := 500 * time.Millisecond
+	q := New("test", wait)
+	defer q.Close()
+
+	q.Tick()
+
+	if q.events.Len() != 1 {
+		t.Errorf("Expected 1 element in the queue but got %d", q.events.Len())
+	}
+
+	time.Sleep(wait)
+	q.TrimNow()
+
+	if q.events.Len() != 0 {
+		t.Errorf("Expected 0 elements in the queue but got %d", q.events.Len())
+	}
+}
+
 func TestQueue_AddTrimCount(t *testing.T) {
 	defer cleanup()
 

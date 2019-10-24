@@ -14,10 +14,13 @@ import (
 	"time"
 )
 
+const vacuumInterval = 5 * time.Minute
+
 type server struct {
 	pb.UnimplementedPipeServer
 
-	queues sync.Map
+	queues       sync.Map
+	vacuumTicker *time.Ticker
 }
 
 func (s *server) Push(ctx context.Context, req *pb.Events) (*pb.Response, error) {
@@ -25,6 +28,7 @@ func (s *server) Push(ctx context.Context, req *pb.Events) (*pb.Response, error)
 	for _, k := range req.Keys {
 		q := s.getOrInsert(k)
 		q.Tick()
+		q.TrimNow()
 		queues[k] = convert(q)
 	}
 	return &pb.Response{Queues: queues}, nil
@@ -34,6 +38,7 @@ func (s *server) Get(ctx context.Context, req *pb.GetRequest) (*pb.Response, err
 	queues := make(map[string]*pb.Queue)
 	for _, k := range req.Keys {
 		q := s.getOrInsert(k)
+		q.TrimNow()
 		queues[k] = convert(q)
 	}
 	return &pb.Response{Queues: queues}, nil
@@ -50,11 +55,21 @@ func main() {
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", *port))
 	grpcServer := grpc.NewServer()
 
-	s := &server{}
+	ticker := time.NewTicker(vacuumInterval)
+	s := &server{vacuumTicker: ticker}
+	go func() {
+		for {
+			<-s.vacuumTicker.C
+			s.vacuum()
+		}
+	}()
+	defer ticker.Stop()
+
 	pb.RegisterPipeServer(grpcServer, s)
 
 	log.Printf("Starting server on port %d", *port)
 	err = grpcServer.Serve(lis)
+	defer grpcServer.Stop()
 	if err != nil {
 		log.Fatalf("error starting server: %s", err)
 	}
@@ -77,4 +92,15 @@ func convert(q *queue.Queue) *pb.Queue {
 			AvgDeltaMs: stats.AvgDeltaMs,
 		},
 	}
+}
+
+func (s *server) vacuum() {
+	s.queues.Range(func(k, v interface{}) bool {
+		q := v.(*queue.Queue)
+		c := q.TrimNow()
+		if c > 0 {
+			log.Printf("auto-trimmed %d events from %s", c, q)
+		}
+		return true
+	})
 }

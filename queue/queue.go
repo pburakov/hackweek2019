@@ -27,10 +27,10 @@ type Queue struct {
 	appendLog  *os.File
 
 	// internal stats (updated on queue change)
-	count        int
+	n            int
 	deltaSum     int64
 	prevOldestTs time.Time
-	avg          float64
+	avgDelta     float64
 }
 
 func (q Queue) String() string {
@@ -51,10 +51,15 @@ func New(key string, windowSize time.Duration) *Queue {
 }
 
 func (q *Queue) Stats() *Stats {
-	q.trimUntil(time.Now().Add(-q.windowSize))
-
-	stats := &Stats{Count: q.count, AvgDeltaMs: q.avg}
+	stats := &Stats{Count: q.n, AvgDeltaMs: q.avgDelta}
 	return stats
+}
+
+func (q *Queue) TrimNow() int {
+	q.lock.Lock()
+	defer q.lock.Unlock()
+
+	return q.trimUntil(time.Now().Add(-q.windowSize))
 }
 
 func (q *Queue) Tick() {
@@ -82,12 +87,11 @@ func (q *Queue) addEvent(ev *event) {
 		q.deltaSum += ev.timestamp.Sub(oldf.Value.(*event).timestamp).Milliseconds()
 	}
 	q.events.PushFront(ev)
+	q.n = q.events.Len()
 }
 
-func (q *Queue) trimUntil(cutoff time.Time) {
-	q.lock.Lock()
-	defer q.lock.Unlock()
-
+func (q *Queue) trimUntil(cutoff time.Time) int {
+	count := 0
 	for elem := q.events.Back(); elem != nil; elem = q.events.Back() {
 		ev := elem.Value.(*event)
 		ts := ev.timestamp
@@ -98,12 +102,14 @@ func (q *Queue) trimUntil(cutoff time.Time) {
 			q.events.Remove(elem)
 			q.deltaSum = q.deltaSum - ts.Sub(q.prevOldestTs).Milliseconds()
 			q.prevOldestTs = ts
+			count++
 		}
 	}
-	q.count = q.events.Len()
-	if q.count != 0 {
-		q.avg = float64(q.deltaSum) / float64(q.count)
+	q.n = q.events.Len()
+	if q.n != 0 {
+		q.avgDelta = float64(q.deltaSum) / float64(q.n)
 	}
+	return count
 }
 
 func mustOpenFile(key string) *os.File {
@@ -137,7 +143,7 @@ func (q *Queue) readEvents(f *os.File) {
 		q.addEvent(&ev)
 		count++
 	}
-	log.Printf("added %d events into %s", count, q)
+	log.Printf("read %d events into %s from a file", count, q)
 }
 
 func (q *Queue) Close() {
