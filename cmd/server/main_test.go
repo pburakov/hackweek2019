@@ -1,14 +1,30 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"spotify/pipe/queue"
+	pb "spotify/pipe/schema"
 	"testing"
 )
 
-func TestPipe_Push(t *testing.T) {
+func TestServer_Push(t *testing.T) {
+	s := new(server)
+	keys := []string{"key1", "key2"}
+
+	for i := uint64(1); i <= 5; i++ {
+		resp, _ := s.Push(context.Background(), &pb.Events{Keys: keys})
+		count1 := resp.Queues["key1"].Stats.Count
+		count2 := resp.Queues["key2"].Stats.Count
+		if count1 != i || count2 != i {
+			t.Fatalf("Expected count for both keys to be %d, but got %d and %d", i, count1, count2)
+		}
+	}
+}
+
+func TestServer_GetOrInsert(t *testing.T) {
 	key := "test_key"
 
 	s := new(server)

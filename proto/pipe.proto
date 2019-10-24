@@ -1,11 +1,7 @@
 syntax = "proto3";
 
-message Event {
-    string key = 1;
-}
-
-message Batch {
-    repeated Event events = 1;
+message Events {
+    repeated string keys = 1;
 }
 
 message Stats {
@@ -17,11 +13,15 @@ message Queue {
     Stats stats = 1;
 }
 
-message Multi {
-    repeated Queue queues = 1;
+message Response {
+    map<string, Queue> queues = 1;
+}
+
+message GetRequest {
+    repeated string keys = 1;
 }
 
 service Pipe {
-    rpc push (Event) returns (Queue);
-    rpc batch (Batch) returns (Multi);
+    rpc push (Events) returns (Response);
+    rpc get (GetRequest) returns (Response);
 }

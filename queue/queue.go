@@ -137,7 +137,7 @@ func (q *Queue) readEvents(f *os.File) {
 		q.addEvent(&ev)
 		count++
 	}
-	log.Printf("added %d events into queue %s", count, q)
+	log.Printf("added %d events into %s", count, q)
 }
 
 func (q *Queue) Close() {

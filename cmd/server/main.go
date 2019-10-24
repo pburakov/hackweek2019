@@ -20,21 +20,23 @@ type server struct {
 	queues sync.Map
 }
 
-func (s *server) Push(ctx context.Context, req *pb.Event) (*pb.Queue, error) {
-	q := s.getOrInsert(req.Key)
-	q.Tick()
-	return convert(q), nil
+func (s *server) Push(ctx context.Context, req *pb.Events) (*pb.Response, error) {
+	queues := make(map[string]*pb.Queue)
+	for _, k := range req.Keys {
+		q := s.getOrInsert(k)
+		q.Tick()
+		queues[k] = convert(q)
+	}
+	return &pb.Response{Queues: queues}, nil
 }
 
-func (s *server) Batch(ctx context.Context, req *pb.Batch) (*pb.Multi, error) {
-	queues := make([]*pb.Queue, 0)
-	for _, ev := range req.Events {
-		v, ok := s.queues.Load(ev.Key)
-		if ok {
-			queues = append(queues, convert(v.(*queue.Queue)))
-		}
+func (s *server) Get(ctx context.Context, req *pb.GetRequest) (*pb.Response, error) {
+	queues := make(map[string]*pb.Queue)
+	for _, k := range req.Keys {
+		q := s.getOrInsert(k)
+		queues[k] = convert(q)
 	}
-	return &pb.Multi{Queues: queues}, nil
+	return &pb.Response{Queues: queues}, nil
 }
 
 func main() {
